@@ -1,0 +1,76 @@
+name: CI on Fedora
+
+on:
+  pull_request:
+    branches:
+    - master
+  workflow_dispatch:
+
+env:
+  wf_commit: 46b129f78cf9641ebdf3c81dd15b2a27800cac2a
+  coke_commit: efd4cef6b3158468dff27c1b04e93962549e2612
+
+jobs:
+  build-fedora:
+    name: fedora-43
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:43
+    steps:
+    - name: Prepare
+      run: |
+        sudo dnf install -y \
+          cmake git valgrind openssl openssl-devel gtest gtest-devel \
+          clang libcxx libcxx-devel ninja
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: sogou/workflow
+        ref: ${{ env.wf_commit }}
+        path: workflow
+    - uses: actions/checkout@v4
+      with:
+        repository: kedixa/coke
+        ref: ${{ env.coke_commit }}
+        path: coke
+    - name: Install Workflow
+      run: |
+        cmake -S workflow -B build.workflow \
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_FLAGS="-stdlib=libc++"
+        cmake --build build.workflow -j 8
+        cmake --install build.workflow --prefix local
+    - name: Install Coke
+      run: |
+        cmake -S coke -B build.coke \
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_PREFIX_PATH=local \
+          -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_FLAGS="-stdlib=libc++"
+        cmake --build build.coke -j 8
+        cmake --install build.coke --prefix local
+    - name: CMake Configure with Module
+      run: |
+        cmake -Wno-dev -S . -B build.cmake \
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_PREFIX_PATH=local \
+          -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+          -G Ninja -DUSE_IMPORT_COKE=ON
+    - name: Build Module
+      run: |
+        cmake --build build.cmake -j 1 --target coke_module
+    - name: Build Examples with Module
+      run: |
+        cmake --build build.cmake -j 1 --target all_examples
+    - name: Clear Cache
+      run: |
+        rm -rf build.cmake
+    - name: CMake Configure without Module
+      run: |
+        cmake -Wno-dev -S . -B build.cmake \
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_PREFIX_PATH=local \
+          -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+          -G Ninja -DUSE_IMPORT_COKE=OFF
+    - name: Build Examples without Module
+      run: |
+        cmake --build build.cmake -j 1 --target all_examples
